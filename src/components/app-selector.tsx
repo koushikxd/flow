@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
-import { RefreshCw, Check } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import type { RunningApp } from '@/lib/types';
+import { useState, useEffect, useMemo } from 'react';
+import { Search, Check, Loader2 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import type { InstalledApp } from '@/lib/types';
 import * as api from '@/lib/tauri';
 
 interface AppSelectorProps {
@@ -9,117 +9,117 @@ interface AppSelectorProps {
   onSelect: (appName: string) => void;
 }
 
-const COMMON_APPS = [
-  'Cursor',
-  'Visual Studio Code',
-  'Terminal',
-  'iTerm2',
-  'Chrome',
-  'Firefox',
-  'Safari',
-  'Slack',
-  'Discord',
-  'Notion',
-  'Figma',
-  'Spotify',
-];
-
 export function AppSelector({ selectedApps, onSelect }: AppSelectorProps) {
-  const [detectedApps, setDetectedApps] = useState<RunningApp[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  const refreshApps = async () => {
-    setLoading(true);
-    try {
-      const apps = await api.getRunningApps();
-      setDetectedApps(apps);
-    } catch (error) {
-      console.error('Failed to get running apps:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [installedApps, setInstalledApps] = useState<InstalledApp[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
-    refreshApps();
+    const loadApps = async () => {
+      try {
+        const apps = await api.getInstalledApps();
+        setInstalledApps(apps);
+      } catch (error) {
+        console.error('Failed to get installed apps:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadApps();
   }, []);
 
-  const allApps = [
-    ...detectedApps.map((a) => a.name),
-    ...COMMON_APPS.filter(
-      (app) => !detectedApps.some((d) => d.name.toLowerCase().includes(app.toLowerCase()))
-    ),
-  ];
+  const filteredApps = useMemo(() => {
+    const query = searchQuery.toLowerCase();
+    return installedApps.filter((app) =>
+      app.name.toLowerCase().includes(query)
+    );
+  }, [installedApps, searchQuery]);
 
-  const uniqueApps = [...new Set(allApps)].filter(
-    (app) => !selectedApps.some((s) => s.toLowerCase() === app.toLowerCase())
+  const availableApps = filteredApps.filter(
+    (app) => !selectedApps.some((s) => s.toLowerCase() === app.name.toLowerCase())
   );
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          Click to add an app to track
-        </p>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={refreshApps}
-          disabled={loading}
-          className="gap-2"
-        >
-          <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
+    <div className="space-y-4">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          placeholder="Search installed apps..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="pl-9"
+        />
       </div>
 
-      {detectedApps.length > 0 && (
-        <div>
+      <div className="max-h-64 overflow-auto space-y-1">
+        {availableApps.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-4">
+            {searchQuery ? 'No apps found' : 'All apps selected'}
+          </p>
+        ) : (
+          availableApps.map((app) => (
+            <AppItem
+              key={app.path}
+              name={app.name}
+              isSelected={false}
+              onClick={() => onSelect(app.name)}
+            />
+          ))
+        )}
+      </div>
+
+      {selectedApps.length > 0 && (
+        <div className="pt-3 border-t border-border">
           <p className="text-xs text-muted-foreground uppercase tracking-wider mb-2">
-            Currently Running
+            Selected ({selectedApps.length})
           </p>
           <div className="flex flex-wrap gap-2">
-            {detectedApps.map((app) => {
-              const isSelected = selectedApps.some(
-                (s) => s.toLowerCase() === app.name.toLowerCase()
-              );
-              return (
-                <button
-                  key={app.processId}
-                  onClick={() => !isSelected && onSelect(app.name)}
-                  disabled={isSelected}
-                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm transition-colors ${
-                    isSelected
-                      ? 'bg-primary/20 text-primary cursor-default'
-                      : 'bg-muted hover:bg-muted/80 cursor-pointer'
-                  }`}
-                >
-                  {isSelected && <Check className="h-3 w-3" />}
-                  {app.name}
-                </button>
-              );
-            })}
+            {selectedApps.map((app) => (
+              <span
+                key={app}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-primary/20 text-primary"
+              >
+                <Check className="h-3 w-3" />
+                {app}
+              </span>
+            ))}
           </div>
         </div>
       )}
-
-      <div>
-        <p className="text-xs text-muted-foreground uppercase tracking-wider mb-2">
-          Common Apps
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {uniqueApps.slice(0, 12).map((app) => (
-            <button
-              key={app}
-              onClick={() => onSelect(app)}
-              className="px-3 py-1.5 rounded-full text-sm bg-muted hover:bg-muted/80 transition-colors"
-            >
-              {app}
-            </button>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
 
+interface AppItemProps {
+  name: string;
+  isSelected: boolean;
+  onClick: () => void;
+}
+
+function AppItem({ name, isSelected, onClick }: AppItemProps) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={isSelected}
+      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${
+        isSelected
+          ? 'bg-primary/10 text-primary cursor-default'
+          : 'hover:bg-muted cursor-pointer'
+      }`}
+    >
+      <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center text-xs font-medium">
+        {name.charAt(0).toUpperCase()}
+      </div>
+      <span className="text-sm truncate">{name}</span>
+      {isSelected && <Check className="h-4 w-4 ml-auto shrink-0" />}
+    </button>
+  );
+}

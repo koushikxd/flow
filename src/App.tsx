@@ -18,11 +18,11 @@ function App() {
       setCurrentPage('space');
     } else {
       setCurrentPage(page as Page);
-    }
+  }
   };
 
   return (
-    <div className="dark h-full flex flex-col">
+    <div className="h-full flex flex-col bg-background text-foreground">
       <main className="flex-1 overflow-auto pb-20">
         {currentPage === 'home' && <HomePage onNavigate={handleNavigate} />}
         {currentPage === 'space' && selectedSpaceId && (
@@ -32,7 +32,7 @@ function App() {
         {currentPage === 'settings' && <SettingsPage onNavigate={handleNavigate} />}
       </main>
       <Navbar currentPage={currentPage} onNavigate={handleNavigate} />
-    </div>
+      </div>
   );
 }
 

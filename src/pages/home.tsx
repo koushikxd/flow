@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Timer, BarChart3 } from 'lucide-react';
+import { Plus, Timer, BarChart3, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -12,6 +12,7 @@ import {
 import { SpaceCard } from '@/components/space-card';
 import { useSpaces } from '@/hooks/use-spaces';
 import { useTracking, formatDuration, getTotalDuration } from '@/hooks/use-tracking';
+import { useLiveTimer, formatLiveDuration } from '@/hooks/use-live-timer';
 import { SPACE_COLORS } from '@/lib/types';
 
 interface HomePageProps {
@@ -21,6 +22,7 @@ interface HomePageProps {
 export function HomePage({ onNavigate }: HomePageProps) {
   const { spaces, loading, create, toggle } = useSpaces();
   const { entries } = useTracking();
+  const sessionInfo = useLiveTimer();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [newSpaceName, setNewSpaceName] = useState('');
   const [selectedColor, setSelectedColor] = useState<string>(SPACE_COLORS[0]);
@@ -120,14 +122,22 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
       {activeSpace && (
         <div className="bg-gradient-to-r from-primary/10 to-transparent border border-primary/20 rounded-lg p-4">
-          <div className="flex items-center gap-3">
-            <div
-              className="w-3 h-3 rounded-full animate-pulse"
-              style={{ backgroundColor: activeSpace.color }}
-            />
-            <div>
-              <p className="text-sm font-medium">Currently Tracking</p>
-              <p className="text-xs text-muted-foreground">{activeSpace.name}</p>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div
+                className="w-3 h-3 rounded-full animate-pulse"
+                style={{ backgroundColor: activeSpace.color }}
+              />
+              <div>
+                <p className="text-sm font-medium">Currently Tracking</p>
+                <p className="text-xs text-muted-foreground">{activeSpace.name}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Play className="h-3 w-3 text-primary" />
+              <span className="text-xl font-mono font-medium tabular-nums">
+                {formatLiveDuration(sessionInfo.sessionDuration)}
+              </span>
             </div>
           </div>
         </div>

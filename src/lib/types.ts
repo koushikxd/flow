@@ -23,6 +23,11 @@ export interface RunningApp {
   processId: number;
 }
 
+export interface InstalledApp {
+  name: string;
+  path: string;
+}
+
 export interface AppStats {
   [appName: string]: number;
 }

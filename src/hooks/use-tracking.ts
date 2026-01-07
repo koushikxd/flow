@@ -26,7 +26,7 @@ export function useTracking(spaceId?: string) {
   useEffect(() => {
     refresh();
     
-    const interval = setInterval(refresh, 5000);
+    const interval = setInterval(refresh, 15000);
     const unlisten = listen('tracking-changed', refresh);
 
     return () => {

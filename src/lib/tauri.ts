@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { TrackingSpace, TimeEntry, AppSettings, RunningApp, AppStats } from './types';
+import type { TrackingSpace, TimeEntry, AppSettings, RunningApp, InstalledApp, AppStats } from './types';
 
 export async function getRunningApps(): Promise<RunningApp[]> {
   return invoke('get_running_apps');
@@ -7,6 +7,10 @@ export async function getRunningApps(): Promise<RunningApp[]> {
 
 export async function getActiveWindowInfo(): Promise<RunningApp | null> {
   return invoke('get_active_window_info');
+}
+
+export async function getInstalledApps(): Promise<InstalledApp[]> {
+  return invoke('get_installed_apps');
 }
 
 export async function getSpaces(): Promise<TrackingSpace[]> {
@@ -53,3 +57,12 @@ export async function getTodayStats(): Promise<AppStats> {
   return invoke('get_today_stats');
 }
 
+export interface SessionInfo {
+  spaceId: string | null;
+  sessionDuration: number;
+  isTracking: boolean;
+}
+
+export async function getCurrentSessionInfo(): Promise<SessionInfo> {
+  return invoke('get_current_session_info');
+}

@@ -72,10 +72,17 @@ pub struct RunningApp {
     pub process_id: u64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct InstalledApp {
+    pub name: String,
+    pub path: String,
+}
+
 pub struct TrackingState {
     pub active_space_id: Option<String>,
     pub last_app: Option<String>,
     pub last_check: Option<std::time::Instant>,
+    pub session_start: Option<std::time::Instant>,
 }
 
 impl Default for TrackingState {
@@ -84,8 +91,19 @@ impl Default for TrackingState {
             active_space_id: None,
             last_app: None,
             last_check: None,
+            session_start: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionInfo {
+    #[serde(rename = "spaceId")]
+    pub space_id: Option<String>,
+    #[serde(rename = "sessionDuration")]
+    pub session_duration: u64,
+    #[serde(rename = "isTracking")]
+    pub is_tracking: bool,
 }
 
 type SharedTrackingState = Arc<RwLock<TrackingState>>;
@@ -128,6 +146,83 @@ fn get_active_window_info() -> Option<RunningApp> {
         name: w.app_name,
         process_id: w.process_id,
     })
+}
+
+#[tauri::command]
+fn get_installed_apps() -> Vec<InstalledApp> {
+    let mut apps: Vec<InstalledApp> = Vec::new();
+    
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(entries) = std::fs::read_dir("/Applications") {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let path = entry.path();
+                if path.extension().map_or(false, |ext| ext == "app") {
+                    if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                        apps.push(InstalledApp {
+                            name: name.to_string(),
+                            path: path.to_string_lossy().to_string(),
+                        });
+                    }
+                }
+            }
+        }
+        if let Ok(entries) = std::fs::read_dir("/System/Applications") {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let path = entry.path();
+                if path.extension().map_or(false, |ext| ext == "app") {
+                    if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                        apps.push(InstalledApp {
+                            name: name.to_string(),
+                            path: path.to_string_lossy().to_string(),
+                        });
+                    }
+                }
+            }
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            let user_apps = format!("{}/Applications", home);
+            if let Ok(entries) = std::fs::read_dir(&user_apps) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let path = entry.path();
+                    if path.extension().map_or(false, |ext| ext == "app") {
+                        if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                            apps.push(InstalledApp {
+                                name: name.to_string(),
+                                path: path.to_string_lossy().to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    #[cfg(target_os = "windows")]
+    {
+        let program_files = std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".to_string());
+        let program_files_x86 = std::env::var("ProgramFiles(x86)").unwrap_or_else(|_| "C:\\Program Files (x86)".to_string());
+        
+        for dir in [&program_files, &program_files_x86] {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
+                            apps.push(InstalledApp {
+                                name: name.to_string(),
+                                path: path.to_string_lossy().to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    apps.dedup_by(|a, b| a.name.to_lowercase() == b.name.to_lowercase());
+    apps
 }
 
 #[tauri::command]
@@ -199,10 +294,12 @@ async fn toggle_tracking(
     if is_now_active {
         ts.active_space_id = Some(space_id);
         ts.last_check = Some(std::time::Instant::now());
+        ts.session_start = Some(std::time::Instant::now());
         ts.last_app = None;
     } else {
         ts.active_space_id = None;
         ts.last_check = None;
+        ts.session_start = None;
         ts.last_app = None;
     }
     
@@ -226,6 +323,7 @@ async fn stop_all_tracking(
     let mut ts = tracking_state.write().await;
     ts.active_space_id = None;
     ts.last_check = None;
+    ts.session_start = None;
     ts.last_app = None;
     
     let _ = app.emit("tracking-changed", false);
@@ -268,6 +366,22 @@ fn get_today_stats(app: AppHandle) -> HashMap<String, u64> {
     }
     
     stats
+}
+
+#[tauri::command]
+async fn get_current_session_info(
+    tracking_state: State<'_, SharedTrackingState>,
+) -> Result<SessionInfo, String> {
+    let ts = tracking_state.read().await;
+    let session_duration = ts.session_start
+        .map(|start| start.elapsed().as_secs())
+        .unwrap_or(0);
+    
+    Ok(SessionInfo {
+        space_id: ts.active_space_id.clone(),
+        session_duration,
+        is_tracking: ts.active_space_id.is_some(),
+    })
 }
 
 fn update_tray_menu(app: &AppHandle, spaces: &[TrackingSpace]) {
@@ -352,17 +466,14 @@ async fn tracking_loop(app: AppHandle, tracking_state: SharedTrackingState) {
             a.to_lowercase().contains(&current_app.to_lowercase())
         });
         
+        let mut ts = tracking_state.write().await;
         if is_tracked {
-            let mut ts = tracking_state.write().await;
-            if let Some(last_check) = ts.last_check {
-                let elapsed = last_check.elapsed().as_secs();
-                if ts.last_app.as_ref() == Some(&current_app) && elapsed > 0 {
-                    record_time(&app, &space_id, &current_app, elapsed);
-                }
-            }
+            record_time(&app, &space_id, &current_app, 1);
             ts.last_app = Some(current_app);
-            ts.last_check = Some(std::time::Instant::now());
+        } else {
+            ts.last_app = None;
         }
+        ts.last_check = Some(std::time::Instant::now());
     }
 }
 
@@ -426,10 +537,12 @@ pub fn run() {
                             if is_now_active {
                                 ts_guard.active_space_id = Some(space_id);
                                 ts_guard.last_check = Some(std::time::Instant::now());
+                                ts_guard.session_start = Some(std::time::Instant::now());
                                 ts_guard.last_app = None;
                             } else {
                                 ts_guard.active_space_id = None;
                                 ts_guard.last_check = None;
+                                ts_guard.session_start = None;
                                 ts_guard.last_app = None;
                             }
                             
@@ -456,6 +569,17 @@ pub fn run() {
             
             update_tray_menu(app.handle(), &state.spaces);
             
+            if let Some(active_space) = state.spaces.iter().find(|s| s.is_active) {
+                let ts = tracking_state_clone.clone();
+                let space_id = active_space.id.clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut ts_guard = ts.write().await;
+                    ts_guard.active_space_id = Some(space_id);
+                    ts_guard.session_start = Some(std::time::Instant::now());
+                    ts_guard.last_check = Some(std::time::Instant::now());
+                });
+            }
+            
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(tracking_loop(app_handle, tracking_state_clone));
             
@@ -464,6 +588,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_running_apps,
             get_active_window_info,
+            get_installed_apps,
             get_spaces,
             save_space,
             create_space,
@@ -474,6 +599,7 @@ pub fn run() {
             get_settings,
             save_settings,
             get_today_stats,
+            get_current_session_info,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
